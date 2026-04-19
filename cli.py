@@ -67,6 +67,26 @@ from gold_cli.banner import _format_context_length, format_banner_version_label
 
 _COMMAND_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
+# ECG-style heartbeat pulse frames shown while waiting for the first API response.
+# Each frame is a fixed-width bar chart; the pulse rises to peak then fades away,
+# cycling at ~0.1s per frame (≈70 BPM).
+_HEARTBEAT_FRAMES = (
+    "▁▁▁▁▁▁▁▁▁▁▁▁▁",
+    "▁▁▁▁▁▁▁▁▁▁▁▁▁",
+    "▁▁▁▁▁▁▁▁▁▁▁▁▁",
+    "▁▁▁▁▁▁▂▁▁▁▁▁▁",
+    "▁▁▁▁▁▂▄▂▁▁▁▁▁",
+    "▁▁▁▁▂▄▆▄▂▁▁▁▁",
+    "▁▁▁▂▄▆█▆▄▂▁▁▁",
+    "▁▁▁▁▂▄▆▄▂▁▁▁▁",
+    "▁▁▁▁▁▂▄▂▁▁▁▁▁",
+    "▁▁▁▁▁▁▂▁▁▁▁▁▁",
+    "▁▁▁▁▁▁▁▁▁▁▁▁▁",
+    "▁▁▁▁▁▁▁▁▁▁▁▁▁",
+    "▁▁▁▁▁▁▁▁▁▁▁▁▁",
+    "▁▁▁▁▁▁▁▁▁▁▁▁▁",
+)
+
 
 def _shimmer_text_fragments(text: str, t: float) -> list:
     """Return per-character prompt_toolkit (style, char) tuples with a shimmer sweep."""
@@ -1826,6 +1846,8 @@ class GoldCLI:
         self._secret_deadline = 0
         self._spinner_text: str = ""  # thinking spinner text for TUI
         self._tool_start_time: float = 0.0  # monotonic timestamp when current tool started (for live elapsed)
+        self._heartbeat_text: str = ""  # pulse animation shown while waiting for first API response
+        self._heartbeat_start: float = 0.0  # monotonic start time for heartbeat elapsed timer
         self._pending_tool_info: dict = {}  # function_name -> list of (preview, args) for stacked scrollback
         self._last_scrollback_tool: str = ""  # last tool name printed to scrollback (for "new" dedup)
         self._command_running = False
@@ -2013,7 +2035,7 @@ class GoldCLI:
 
     def _spinner_widget_height(self, width: Optional[int] = None) -> int:
         """Return the visible height for the spinner/status text line above the status bar."""
-        if not getattr(self, "_spinner_text", ""):
+        if not getattr(self, "_spinner_text", "") and not getattr(self, "_heartbeat_text", ""):
             return 0
         return 0 if self._use_minimal_tui_chrome(width=width) else 1
 
@@ -7718,6 +7740,14 @@ class GoldCLI:
             agent_thread = threading.Thread(target=run_agent, daemon=True)
             agent_thread.start()
 
+            # Start heartbeat animation immediately so the user sees activity
+            # during the gap between submission and the first tool/thinking callback.
+            import time as _hb_time
+            _hb_idx = 0
+            self._heartbeat_text = _HEARTBEAT_FRAMES[0]
+            self._heartbeat_start = _hb_time.monotonic()
+            self._invalidate()
+
             # Monitor the dedicated interrupt queue while the agent runs.
             # _interrupt_queue is separate from _pending_input, so process_loop
             # and chat() never compete for the same queue.
@@ -7754,6 +7784,10 @@ class GoldCLI:
                                 pass
                             break
                     except queue.Empty:
+                        # Advance heartbeat pulse when no tool/thinking text is active.
+                        if not self._spinner_text:
+                            _hb_idx += 1
+                            self._heartbeat_text = _HEARTBEAT_FRAMES[_hb_idx % len(_HEARTBEAT_FRAMES)]
                         # Force prompt_toolkit to flush any pending stdout
                         # output from the agent thread.  Without this, the
                         # StdoutProxy buffer only flushes on renderer passes
@@ -7765,6 +7799,10 @@ class GoldCLI:
                     agent_thread.join(0.1)
 
             agent_thread.join()  # Ensure agent thread completes
+
+            # Clear heartbeat — response is in, no more gap to fill.
+            self._heartbeat_text = ""
+            self._heartbeat_start = 0.0
 
             # Proactively clean up async clients whose event loop is dead.
             # The agent thread may have created AsyncOpenAI clients bound
@@ -9036,6 +9074,10 @@ class GoldCLI:
 
         def get_spinner_text():
             txt = cli_ref._spinner_text
+            _is_heartbeat = False
+            if not txt:
+                txt = getattr(cli_ref, '_heartbeat_text', '')
+                _is_heartbeat = bool(txt)
             if not txt:
                 return []
             import time as _time
@@ -9044,6 +9086,8 @@ class GoldCLI:
             frags: list = [('class:hint', f'  {frame} ')]
             frags.extend(_shimmer_text_fragments(txt, t))
             t0 = cli_ref._tool_start_time
+            if t0 == 0 and _is_heartbeat:
+                t0 = getattr(cli_ref, '_heartbeat_start', 0)
             if t0 > 0:
                 elapsed = t - t0
                 if elapsed >= 60:
@@ -9503,7 +9547,7 @@ class GoldCLI:
                 if not self._app:
                     _time.sleep(0.1)
                     continue
-                if self._command_running or getattr(self, "_spinner_text", ""):
+                if self._command_running or getattr(self, "_spinner_text", "") or getattr(self, "_heartbeat_text", ""):
                     self._invalidate(min_interval=0.08)
                     _time.sleep(0.08)
                 else:
