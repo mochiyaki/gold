@@ -2971,27 +2971,11 @@ def _run_first_time_quick_setup(config: dict, gold_home, is_existing: bool):
 
     save_config(config)
 
-    # Step 3: Offer messaging gateway setup
-    print()
-    gateway_choice = prompt_choice(
-        "Connect a messaging platform? (Telegram, Discord, etc.)",
-        [
-            "Skip — set up later with 'gold setup gateway'",
-            "Set up messaging now (recommended)",
-        ],
-        0,
-    )
-
-    if gateway_choice == 1:
-        setup_gateway(config)
-        save_config(config)
-
     print()
     print_success("Setup complete! You're ready to go.")
     print()
     print_info("  Configure all settings:    gold setup")
-    if gateway_choice != 1:
-        print_info("  Connect Telegram/Discord:  gold setup gateway")
+    print_info("  Connect Telegram/Discord:  gold setup gateway")
     print()
 
     _print_setup_summary(config, gold_home)
