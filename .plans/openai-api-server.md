@@ -15,7 +15,7 @@ usable as a backend for all of them — no custom adapters needed.
 │  Open WebUI      │──┐
 │  LobeChat        │  │    POST /v1/chat/completions
 │  LibreChat       │  ├──► Authorization: Bearer <key>     ┌─────────────────┐
-│  AnythingLLM     │  │    {"messages": [...]}             │  gold-agent  │
+│  AnythingLLM     │  │    {"messages": [...]}             │  gold-agent     │
 │  NextChat        │  │                                    │  gateway        │
 │  Any OAI client  │──┘    ◄── SSE streaming response      │  (API server)   │
 └──────────────────┘                                       └─────────────────┘
